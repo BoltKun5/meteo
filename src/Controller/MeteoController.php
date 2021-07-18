@@ -20,34 +20,95 @@ class MeteoController extends AbstractController
     public function create(Request $request): Response
     {
         try {
-            // $ville1 = $request->get('ville1');
-            // $ville2 = $request->get('ville2');
+            $ville1 = $request->get('ville1');
+            $ville2 = $request->get('ville2');
+            // $ville1 = "azeaze";
+            // $ville2 = "Paris";
 
-            $ville1 = "London";
-            $ville2 = "Paris";
+            // return new Response($ville1." ".$ville2);
+
+            if ($ville1 == $ville2) {
+                throw new \Exception("SAME_CITIES");
+            }
+
             $keptData = $this->compareCityData($this->getCityData($ville1), $this->getCityData($ville2));
 
             return new Response(json_encode($keptData));
-
-
         } catch (\Throwable $th) {
-
-            return new Response($th);
-            
+            switch ($th->getMessage()) {
+                case "SAME_CITIES":
+                    return new Response("Les deux villes sont identiques");
+                    break;
+                case "UNDEFINED_CITY":
+                    return new Response("Une des deux villes n'est pas indiquées");
+                    break;
+                case "CITY_NOT_FOUND":
+                    return new Response("Vérifiez l'orthographe des villes");
+                    break;
+                default:
+                    return new Response($th);
+            }
         }
     }
 
 
     public function compareCityData($cityData1, $cityData2)
     {
+        $score1 = 0;
+        $score2 = 0;
+        $differencies1 = $this->getDifferencies($this->getAverageData($cityData1));
+        $differencies2 = $this->getDifferencies($this->getAverageData($cityData2));
 
-        return  $cityData1;
+        if ($differencies1['temp'] > $differencies2['temp'])
+            $score1 += 20;
+        elseif ($differencies1['temp'] < $differencies2['temp'])
+            $score2 += 20;
+
+        if ($differencies1['clouds'] > $differencies2['clouds'])
+            $score1 += 10;
+        elseif ($differencies1['clouds'] < $differencies2['clouds'])
+            $score2 += 10;
+
+        if ($differencies1['humidity'] > $differencies2['humidity'])
+            $score1 += 15;
+        elseif ($differencies1['humidity'] < $differencies2['humidity'])
+            $score2 += 15;
+
+        if ($score1 > $score2) return $cityData1;
+        elseif ($score1 < $score2) return $cityData2;
+        else return "Valeurs égales";
+    }
+
+    public function getDifferencies($averageData)
+    {
+        return array(
+            'temp' => 27 - $averageData['temp'],
+            'clouds' => 15 - $averageData['clouds'],
+            'humidity' => 60 - $averageData['humidity']
+        );
+    }
+
+    public function getAverageData($cityData)
+    {
+        $averageTemp = 0;
+        $averageClouds = 0;
+        $averageHumidity = 0;
+        foreach (json_decode(json_encode($cityData), true)['daily'] as $value) {
+            $averageTemp += $value['temp']['day'];
+            $averageClouds += $value['clouds'];
+            $averageHumidity += $value['humidity'];
+        }
+        return array(
+            'temp' => $averageTemp / 7,
+            'clouds' => $averageClouds / 7,
+            'humidity' => $averageHumidity / 7
+        );
     }
 
     public function getCityData($ville)
     {
-        if (!isset($ville))
-            throw new \Exception("UNDEFINED_CITY", 1);
+        if (!isset($ville) || $ville == "")
+            throw new \Exception("UNDEFINED_CITY");
 
         $client = HttpClient::create();
         $cityPos = $this->getPos($ville, $client);
@@ -68,7 +129,8 @@ class MeteoController extends AbstractController
                 'minutely',
                 'hourly',
                 'alerts'
-            )
+            ),
+            'units' => 'metric'
         );
 
         $url = $this->formatQueryParams("https://api.openweathermap.org/data/2.5/onecall", $queryParams);
@@ -77,7 +139,7 @@ class MeteoController extends AbstractController
         return json_decode($response->getContent());
     }
 
-    function formatQueryParams($chain, $arr)
+    public function formatQueryParams($chain, $arr)
     {
         $chain .= "?";
 
@@ -96,15 +158,15 @@ class MeteoController extends AbstractController
         return $chain;
     }
 
-
     public function getPos($ville)
     {
         $response = $this->fetchPos($ville);
-        $content = $response->getContent();
-        $decodedCord = json_decode($content)->coord;
-        return array('lon' => $decodedCord->lon, 'lat' => $decodedCord->lat);
+        $content = $response->getContent(false);
+        $decodedCord = json_decode($content);
+        if ($decodedCord->cod == '404')
+            throw new \Exception("CITY_NOT_FOUND");
+        return array('lon' => $decodedCord->coord->lon, 'lat' => $decodedCord->coord->lat);
     }
-
 
     public function fetchPos($ville, $client = false)
     {
