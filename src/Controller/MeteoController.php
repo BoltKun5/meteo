@@ -32,22 +32,54 @@ class MeteoController extends AbstractController
             }
 
             $keptData = $this->compareCityData($this->getCityData($ville1), $this->getCityData($ville2));
+            $response = new Response();
+            $response->headers->set('Content-Type', 'application/json');
+            $response->setStatusCode(Response::HTTP_OK);
 
-            return new Response(json_encode($keptData));
+            // On doit renvoyer le nom de la ville car le nom renvoyé par l'API
+            // peut être celui d'une grande ville proche à la place
+
+            if ($keptData[0] == 1)
+                $response->setContent(json_encode(array('ville' => $ville1, 'data' => $keptData[1])));
+            elseif ($keptData[0] == 2)
+                $response->setContent(json_encode(array('ville' => $ville2, 'data' => $keptData[1])));
+            elseif ($keptData[0] == 0)
+                $response->setContent(json_encode(array('ville' => 'equal', 'data' => $keptData[1])));
+
+            // Si les deux villes ont exactement le même score, on l'indique et on renvoie
+            // les infos de la première ville pour avoir des choses à afficher.
+
+            return $response;
         } catch (\Throwable $th) {
+            $response = new Response();
+            $response->setStatusCode(Response::HTTP_NOT_FOUND);
             switch ($th->getMessage()) {
                 case "SAME_CITIES":
-                    return new Response("Les deux villes sont identiques");
+                    $response->setContent(json_encode(array(
+                        'error' => 'SAME_CITIES',
+                        'message' => 'Les deux villes sont identiques'
+                    ), JSON_UNESCAPED_UNICODE));
                     break;
                 case "UNDEFINED_CITY":
-                    return new Response("Une des deux villes n'est pas indiquées");
+                    $response->setContent(json_encode(array(
+                        'error' => 'UNDEFINED_CITY',
+                        'message' => "Une des deux villes n'est pas indiquées"
+                    ), JSON_UNESCAPED_UNICODE));
                     break;
                 case "CITY_NOT_FOUND":
-                    return new Response("Vérifiez l'orthographe des villes");
+                    $response->setContent(json_encode(array(
+                        'error' => 'CITY_NOT_FOUND',
+                        'message' => "Une ville n'a pas été trouvée"
+                    ), JSON_UNESCAPED_UNICODE));
                     break;
                 default:
-                    return new Response($th);
+                    $response->setContent(json_encode(array(
+                        'error' => 'INTERNAL_SERVER_ERROR',
+                        'message' => "Une erreur est survenue"
+                    ), JSON_UNESCAPED_UNICODE));
             }
+            $response->headers->set('Content-Type', 'application/json');
+            return $response;
         }
     }
 
@@ -74,9 +106,9 @@ class MeteoController extends AbstractController
         elseif ($differencies1['humidity'] < $differencies2['humidity'])
             $score2 += 15;
 
-        if ($score1 > $score2) return $cityData1;
-        elseif ($score1 < $score2) return $cityData2;
-        else return "Valeurs égales";
+        if ($score1 > $score2) return array(1, $cityData1);
+        elseif ($score1 < $score2) return array(2, $cityData2);
+        else return array(0, $cityData1);
     }
 
     public function getDifferencies($averageData)
@@ -98,6 +130,9 @@ class MeteoController extends AbstractController
             $averageClouds += $value['clouds'];
             $averageHumidity += $value['humidity'];
         }
+
+        // On garde les valeurs après la virgule pour éviter les égalités
+
         return array(
             'temp' => $averageTemp / 7,
             'clouds' => $averageClouds / 7,
@@ -169,6 +204,10 @@ class MeteoController extends AbstractController
     }
 
     public function fetchPos($ville, $client = false)
+
+    // On ne peut effectuer la requête qu'avec une longitude et une latitude.
+    // On les récupères avec une première requête 
+    
     {
         if (!$client)
             $client = HttpClient::create();
